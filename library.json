@@ -1,0 +1,12 @@
+{
+  "name": "ParallelFlash",
+  "keywords": "parallel, flash, spi",
+  "description": "ParallelFlash. Provides low-latency, high performance access to parallel connected SPI Flash memory with a filesystem-like interface. Familiar file-based functions, similar to the SD library, are used to access data. Fork of SerialFlash by Paul Stoffegen.",
+  "repository":
+  {
+    "type": "git",
+    "url": "https://github.com/FrankBoesing/ParallelFlash.git"
+  },
+  "frameworks": "arduino",
+  "platforms": "*"
+}
