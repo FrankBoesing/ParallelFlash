@@ -563,6 +563,7 @@ void ParallelFlashChip::readSerialNumber(uint8_t *buf) //needs room for 8 bytes
 	for (int i=0; i<8; i++) {
 		buf[i]=serialNumber[i];
 	}
+    //Serial.printf("Serial Number: %02X %02X %02X %02X %02X %02X %02X %02X\n", buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7]);	
 }
 
 uint32_t ParallelFlashChip::capacity(const uint8_t *id)
