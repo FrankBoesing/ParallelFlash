@@ -214,6 +214,7 @@ static void flash_QpiReadBytes( uint8_t * buf, int len) {
 uint16_t ParallelFlashChip::dirindex = 0;
 uint8_t ParallelFlashChip::flags = 0;
 uint8_t ParallelFlashChip::busy = 0;
+uint8_t ParallelFlashChip::serialNumber[8] = {0,0,0,0,0,0,0,0};
 
 //static volatile IO_REG_TYPE *cspin_basereg;
 //static IO_REG_TYPE cspin_bitmask;
@@ -432,6 +433,17 @@ bool ParallelFlashChip::begin()
 	digitalWriteFast(flash_cs, 1);
 	delayMicroseconds(100);
 
+	//	Read Serial Number. SPI Mode only!
+	digitalWriteFast(flash_cs, 0);
+	shiftOut( flash_sio0 ,  flash_sck , MSBFIRST, 0x4B); 
+	for (int i=0; i<4; i++) {
+		shiftOut( flash_sio0 ,  flash_sck , MSBFIRST, 0); 
+	}
+	for (int i=0; i<8; i++) {
+		serialNumber[i] = shiftIn( flash_sio1 ,  flash_sck , MSBFIRST);
+	}
+	digitalWriteFast(flash_cs, 1);
+		
 	//Write Enable
 	digitalWriteFast(flash_cs, 0);
 	shiftOut( flash_sio0 ,  flash_sck , MSBFIRST, 0x06); //Write Enable
@@ -544,6 +556,13 @@ void ParallelFlashChip::readID(uint8_t *buf)
 	flash_QpiReadBytes(buf, 3);  // manufacturer ID, memory type, capacity
 	CSRELEASE();
 	//Serial.printf("ID: %02X %02X %02X\n", buf[0], buf[1], buf[2]);
+}
+
+void ParallelFlashChip::readSerialNumber(uint8_t *buf) //needs room for 8 bytes
+{
+	for (int i=0; i<8; i++) {
+		buf[i]=serialNumber[i];
+	}
 }
 
 uint32_t ParallelFlashChip::capacity(const uint8_t *id)
