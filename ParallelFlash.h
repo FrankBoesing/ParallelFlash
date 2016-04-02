@@ -66,7 +66,13 @@ private:
 				// 1 = suspendable program operation
 				// 2 = suspendable erase operation
 				// 3 = busy for realz!!
-	static uint8_t serialNumber[8];
+	static void enterQPI();
+	static void exitQPI();
+	static void writeByte(const uint8_t val);
+	static void writeBytes(const uint8_t * buf, const int len);
+	static void write16(const uint16_t val);
+	static uint8_t readByte(void);
+	static void readBytes( uint8_t * const buf, int len); 
 };
 
 extern ParallelFlashChip ParallelFlash;

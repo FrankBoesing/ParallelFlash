@@ -38,41 +38,27 @@ const int flash_sio1  =  14; //PTD1 FlashPin 2
 const int flash_sio2  =   7; //PTD2 FlashPin 3
 const int flash_sio3  =   8; //PTD3 FlashPin 7
 
-#define CSRELEASE() {GPIO_D->PDOR |= (1 << 7) | (1 << 5);}
+//Todo: calc these from Pinnumbers..?
+#define MASK_CS 		(1<<7) //PTD7
+#define MASK_SCK		(1<<5) //PTD5
+#define MASK_SIO0		(1<<0) //PTD0
+#define MASK_DATA		(0x0F)
+
+#define MASK_ALL		( MASK_CS | MASK_SCK | MASK_DATA )
+
+#define CSASSERT()  	{GPIO_D->PCOR = MASK_CS;}
+#define CSRELEASE() 	{GPIO_D->PDOR = MASK_CS | MASK_SCK;}
+#define CSRELEASESPI()	{GPIO_D->PDOR = MASK_CS;}
 
 struct sPortConfig {
-  uint32_t PCR0;
-  uint32_t PCR1;
-  uint32_t PCR2;
-  uint32_t PCR3;
-  uint32_t PCR4;
-  uint32_t PCR5;
-  uint32_t PCR6;
-  uint32_t PCR7;
-  uint32_t PCR8;
-  uint32_t PCR9;
-  uint32_t PCR10;
-  uint32_t PCR11;
-  uint32_t PCR12;
-  uint32_t PCR13;
-  uint32_t PCR14;
-  uint32_t PCR15;
-  uint32_t PCR16;
-  uint32_t PCR17;
-  uint32_t PCR18;
-  uint32_t PCR19;
-  uint32_t PCR20;
-  uint32_t PCR21;
-  uint32_t PCR22;
-  uint32_t PCR23;
-  uint32_t PCR24;
-  uint32_t PCR25;
-  uint32_t PCR26;
-  uint32_t PCR27;
-  uint32_t PCR28;
-  uint32_t PCR29;
-  uint32_t PCR30;
-  uint32_t PCR31;
+  uint32_t PCR0;uint32_t PCR1;uint32_t PCR2;uint32_t PCR3;
+  uint32_t PCR4;uint32_t PCR5;uint32_t PCR6;uint32_t PCR7;
+  uint32_t PCR8;uint32_t PCR9;uint32_t PCR10;uint32_t PCR11;
+  uint32_t PCR12;uint32_t PCR13;uint32_t PCR14;uint32_t PCR15;
+  uint32_t PCR16;uint32_t PCR17;uint32_t PCR18;uint32_t PCR19;
+  uint32_t PCR20;uint32_t PCR21;uint32_t PCR22;uint32_t PCR23;
+  uint32_t PCR24;uint32_t PCR25;uint32_t PCR26;uint32_t PCR27;
+  uint32_t PCR28;uint32_t PCR29;uint32_t PCR30;uint32_t PCR31;
 };
 static volatile struct sPortConfig * const pinConfigD = (struct sPortConfig *)0x4004C000;
 
@@ -119,13 +105,24 @@ static volatile struct sGPIO * const GPIO_D = (struct sGPIO *)0x400FF0C0;
 #define flash_Wait3 {  asm volatile ("\tNOP\n");}
 #endif
 
+uint16_t ParallelFlashChip::dirindex = 0;
+uint8_t ParallelFlashChip::flags = 0;
+uint8_t ParallelFlashChip::busy = 0;
 
+#define FLAG_32BIT_ADDR		0x01	// larger than 16 MByte address
+//#define FLAG_STATUS_CMD70	0x02	// requires special busy flag check
+//#define FLAG_DIFF_SUSPEND	0x04	// uses 2 different suspend commands
+//#define FLAG_MULTI_DIE		0x08	// multiple die, don't read cross 32M barrier
+#define FLAG_256K_BLOCKS	0x10	// has 256K erase blocks
+//#define FLAG_DIE_MASK		0xC0	// top 2 bits count during multi-die erase
 
-static void flash_QpiWriteByte(uint8_t val) {
-  volatile uint32_t clk0, clk1;
+	
+void ParallelFlashChip::writeByte(const uint8_t val) {
+  uint32_t clk0, clk1;
   GPIO_D->PDDR |= 0x0f;
-  clk0 = GPIO_D->PDOR & ~( (1 << 7) | (1 << 5) | (1 << 3) | (1 << 2) | (1 << 1) | (1 << 0));  
-  clk1 = clk0 | (1 << 5); //CS=0; CLK=1
+  clk0 = GPIO_D->PDOR & ~MASK_ALL;  
+  clk1 = clk0 | MASK_SCK; 
+   
   GPIO_D->PDOR = clk0;
   flash_Wait2; 
   GPIO_D->PDOR = clk1  | (val >> 4);  
@@ -135,13 +132,13 @@ static void flash_QpiWriteByte(uint8_t val) {
   GPIO_D->PDOR = clk1 | (val & 0x0f);
 }
 
-static void flash_QpiWriteBytes(const uint8_t * buf, const int len) {
-  volatile uint32_t clk0, clk1;
+void ParallelFlashChip::writeBytes(const uint8_t * buf, const int len) {
+  uint32_t clk0, clk1;
   uint8_t val;
   
   GPIO_D->PDDR |= 0x0f;
-  clk0 = GPIO_D->PDOR & ~( (1 << 7) | (1 << 5) | (1 << 3) | (1 << 2) | (1 << 1) | (1 << 0));  
-  clk1 = clk0 | (1 << 5); //CS=0; CLK=1
+  clk0 = GPIO_D->PDOR & ~MASK_ALL;  
+  clk1 = clk0 | MASK_SCK; //CS=0; CLK=1
 
   for (int i = 0; i< len; i++) {
 	GPIO_D->PDOR = clk0;
@@ -155,85 +152,63 @@ static void flash_QpiWriteBytes(const uint8_t * buf, const int len) {
   }
 }
 
-static void flash_QpiWrite16(const uint16_t val) {
+void ParallelFlashChip::write16(const uint16_t val) {
 	uint16_t buf = __REV16(val);
-	flash_QpiWriteBytes((uint8_t*) &buf, 2);
+	writeBytes((uint8_t*) &buf, 2);
 }
 
-static uint8_t flash_QpiReadByte(void) {
+uint8_t ParallelFlashChip::readByte(void) {
   GPIO_D->PDDR &= ~0x0f;    
   
-  volatile uint32_t clk0, clk1;
   volatile uint32_t val;
   
-  clk0 = GPIO_D->PDOR & ~( (1 << 7) | (1 << 5) | (1 << 3) | (1 << 2) | (1 << 1) | (1 << 0));
-  clk1 = clk0 | (1 << 5); //CS=0; CLK=1
-
-  GPIO_D->PDOR = clk0;
+  GPIO_D->PCOR = MASK_CS;
+  
+  GPIO_D->PTOR = MASK_SCK;
+  flash_Wait2;
+  GPIO_D->PTOR = MASK_SCK;
   flash_Wait3;
-  GPIO_D->PDOR = clk1;
+  
   val = (GPIO_D->PDIR<< 4) & 0xf0;
-  flash_Wait1;
-  GPIO_D->PDOR = clk0;
-  flash_Wait3;    
-  GPIO_D->PDOR = clk1;
-//    flash_Wait1;
+  
+  GPIO_D->PTOR = MASK_SCK;
+  flash_Wait2;
+  GPIO_D->PTOR = MASK_SCK;
+  flash_Wait3;
   return val | ( GPIO_D->PDIR & 0x0f );
  
 }
 
-static void flash_QpiReadBytes( uint8_t * buf, int len) {
+void ParallelFlashChip::readBytes( uint8_t * const buf, int len) {
   if (len == 0) return;
   GPIO_D->PDDR &= ~0x0f;    
-  
-  volatile uint32_t clk0, clk1;
+ 
   size_t cnt = 0;
   volatile uint32_t val;
   
-  clk0 = GPIO_D->PDOR & ~( (1 << 7) | (1 << 5) | (1 << 3) | (1 << 2) | (1 << 1) | (1 << 0));
-  clk1 = clk0 | (1 << 5); //CS=0; CLK=1
+  GPIO_D->PCOR = MASK_CS;
   do {          
-    GPIO_D->PDOR = clk0;
-    flash_Wait3;
-    GPIO_D->PDOR = clk1;
+    GPIO_D->PTOR = MASK_SCK;
+	flash_Wait2;
+    GPIO_D->PTOR = MASK_SCK;
+	flash_Wait3;
     val = (GPIO_D->PDIR<< 4) & 0xf0;
-    flash_Wait1;
-    GPIO_D->PDOR = clk0;
-    flash_Wait3;    
-    GPIO_D->PDOR = clk1;
+    GPIO_D->PTOR = MASK_SCK;	
+	flash_Wait2;
+    GPIO_D->PTOR = MASK_SCK;
+	flash_Wait3;
     buf[cnt++] = val | ( GPIO_D->PDIR & 0x0f );
-    flash_Wait1;
   } while (--len);
-  
 }
-
-
-
-
-
-uint16_t ParallelFlashChip::dirindex = 0;
-uint8_t ParallelFlashChip::flags = 0;
-uint8_t ParallelFlashChip::busy = 0;
-uint8_t ParallelFlashChip::serialNumber[8] = {0,0,0,0,0,0,0,0};
-
-//static volatile IO_REG_TYPE *cspin_basereg;
-//static IO_REG_TYPE cspin_bitmask;
-
-#define FLAG_32BIT_ADDR		0x01	// larger than 16 MByte address
-//#define FLAG_STATUS_CMD70	0x02	// requires special busy flag check
-//#define FLAG_DIFF_SUSPEND	0x04	// uses 2 different suspend commands
-//#define FLAG_MULTI_DIE		0x08	// multiple die, don't read cross 32M barrier
-#define FLAG_256K_BLOCKS	0x10	// has 256K erase blocks
-//#define FLAG_DIE_MASK		0xC0	// top 2 bits count during multi-die erase
 
 void ParallelFlashChip::wait(void)
 {
 	uint32_t status;
 	//Serial.print("wait-");
-	flash_QpiWriteByte(0x05); //Read Status Byte #1
+	writeByte(0x05); //Read Status Byte #1
 	while (1) {
-	//	flash_QpiWriteByte(0x05); //Read Status Byte #1
-		status = flash_QpiReadByte();			
+	//	writeByte(0x05); //Read Status Byte #1
+		status = readByte();			
 		//Serial.printf("b=%02x.", status & 0xFF);
 		if (!(status & 1)) break;
 	}
@@ -253,23 +228,23 @@ void ParallelFlashChip::read(uint32_t addr, void *buf, uint32_t len)
 	b = busy;
 	if (b) {
 		// read status register ... chip may no longer be busy
-		flash_QpiWriteByte(0x05); //Read Status Byte #1
-		status = flash_QpiReadByte();
+		writeByte(0x05); //Read Status Byte #1
+		status = readByte();
 		if (!(status & 1)) b = 0;
 		CSRELEASE();
 		if (b == 0) {
 			// chip is no longer busy :-)
 			busy = 0;
 		} else if (b < 3) {
-			flash_QpiWriteByte(0x06); // write enable		
+			writeByte(0x06); // write enable		
 			CSRELEASE();	
 			//delayMicroseconds(1);			
-			flash_QpiWriteByte(0x75);// Suspend command
+			writeByte(0x75);// Suspend command
 			CSRELEASE();
 			
-			flash_QpiWriteByte(0x05); //Read Status Byte #1		
+			writeByte(0x05); //Read Status Byte #1		
 			do {
-				status = flash_QpiReadByte();
+				status = readByte();
 			} while ((status & 0x01));
 			CSRELEASE();
 			
@@ -283,27 +258,27 @@ void ParallelFlashChip::read(uint32_t addr, void *buf, uint32_t len)
 		uint32_t rdlen = len;
 
 		if (f & FLAG_32BIT_ADDR) {			
-			flash_QpiWriteByte(0x0b);
-			flash_QpiWrite16(addr >> 16);			
-			flash_QpiWrite16(addr);		
-			flash_QpiReadByte();//dummy
+			writeByte(0x0b);
+			write16(addr >> 16);			
+			write16(addr);		
+			readByte();//dummy
 		} else {
-			flash_QpiWrite16(0x0b00 | ((addr >> 16) & 255));
-			flash_QpiWrite16(addr);
-			flash_QpiReadByte();//dummy
+			write16(0x0b00 | ((addr >> 16) & 255));
+			write16(addr);
+			readByte();//dummy
 		}
 		
-		flash_QpiReadBytes(p, rdlen);		
+		readBytes(p, rdlen);		
 		CSRELEASE();
 		p += rdlen;
 		addr += rdlen;
 		len -= rdlen;
 	} while (len > 0);
 	if (b) {	
-		flash_QpiWriteByte(0x06); // write enable		
+		writeByte(0x06); // write enable		
 		CSRELEASE();
 		//delayMicroseconds(1);		
-		flash_QpiWriteByte(0x7A);// Suspend command
+		writeByte(0x7A);// Suspend command
 		CSRELEASE();		
 	}
 }
@@ -316,24 +291,24 @@ void ParallelFlashChip::write(uint32_t addr, const void *buf, uint32_t len)
 	 //Serial.printf("WR: addr %08X, len %d\n", addr, len);
 	do {
 		if (busy) wait();		
-		flash_QpiWriteByte(0x06); // write enable		
+		writeByte(0x06); // write enable		
 		CSRELEASE();			
 		max = 256 - (addr & 0xFF);
 		pagelen = (len <= max) ? len : max;		
 		 //Serial.printf("WR: addr %08X, pagelen %d\n", addr, pagelen);
 		if (flags & FLAG_32BIT_ADDR) {
-			flash_QpiWriteByte(0x02); // program page command
-			flash_QpiWrite16(addr >> 16);
-			flash_QpiWrite16(addr);
+			writeByte(0x02); // program page command
+			write16(addr >> 16);
+			write16(addr);
 		} else {
-			flash_QpiWrite16(0x0200 | ((addr >> 16) & 255));
-			flash_QpiWrite16(addr);
+			write16(0x0200 | ((addr >> 16) & 255));
+			write16(addr);
 		}
 		addr += pagelen;
 		len -= pagelen;
 		//delayMicroseconds(1);//Is this needed ?
 		do {
-			flash_QpiWriteByte(*p++);			
+			writeByte(*p++);			
 		} while (--pagelen > 0);
 		CSRELEASE();
 		busy = 1;
@@ -347,10 +322,10 @@ void ParallelFlashChip::eraseAll()
 	readID(id);
 	//Serial.printf("ID: %02X %02X %02X\n", id[0], id[1], id[2]);	
 	// bulk erase command
-	flash_QpiWriteByte(0x06); // write enable		
+	writeByte(0x06); // write enable		
 	CSRELEASE();
 	//delayMicroseconds(1);
-	flash_QpiWriteByte(0xC7);
+	writeByte(0xC7);
 	CSRELEASE();
 	busy = 3;
 }
@@ -359,16 +334,16 @@ void ParallelFlashChip::eraseBlock(uint32_t addr)
 {
 	uint8_t f = flags;
 	if (busy) wait();
-	flash_QpiWriteByte(0x06); // write enable		
+	writeByte(0x06); // write enable		
 	CSRELEASE();
 	//delayMicroseconds(1);	
 	if (f & FLAG_32BIT_ADDR) {
-		flash_QpiWriteByte(0xD8); 		
-		flash_QpiWrite16(addr >> 16);
-		flash_QpiWrite16(addr);
+		writeByte(0xD8); 		
+		write16(addr >> 16);
+		write16(addr);
 	} else {
-		flash_QpiWrite16(0xD800 | ((addr >> 16) & 255));
-		flash_QpiWrite16(addr);
+		write16(0xD800 | ((addr >> 16) & 255));
+		write16(addr);
 	}
 	CSRELEASE();
 	busy = 2;
@@ -381,8 +356,8 @@ bool ParallelFlashChip::ready()
 	if (!busy) return true;
 
 	// all others work by simply reading the status reg
-	flash_QpiWriteByte(0x05);
-	status = flash_QpiReadByte();	
+	writeByte(0x05);
+	status = readByte();	
 	CSRELEASE();	
 	//Serial.printf("ready=%02x\n", status & 0xFF);
 	if ((status & 1)) return false;
@@ -404,8 +379,30 @@ bool ParallelFlashChip::ready()
 //#define FLAG_DIFF_SUSPEND	0x04	// uses 2 different suspend commands
 //#define FLAG_256K_BLOCKS	0x10	// has 256K erase blocks
 
-bool ParallelFlashChip::begin()
+void ParallelFlashChip::enterQPI()
 {
+	if (busy) wait();
+
+	CSASSERT();
+	shiftOut( flash_sio0 ,  flash_sck , MSBFIRST, 0x38); //Enter QPI Mode
+	CSRELEASESPI();
+	GPIO_D->PDDR &= ~0x0f;
+	
+}
+
+void ParallelFlashChip::exitQPI()
+{
+	if (busy) wait();
+	
+	writeByte(0xff); // Exit QPI Mode
+	CSRELEASE();
+	GPIO_D->PCOR = MASK_SCK;
+	GPIO_D->PDDR = (GPIO_D->PDDR & ~0x0f) | MASK_SIO0;
+}
+
+
+bool ParallelFlashChip::begin()
+{	
 	uint8_t id[3];
 	uint8_t f;
 	uint32_t size;
@@ -422,84 +419,18 @@ bool ParallelFlashChip::begin()
 	//Reset/Hold
 	pinMode(flash_sio3, INPUT_PULLUP);
 
-
 	//Software Reset
-	digitalWriteFast(flash_cs, 0);
+	CSASSERT();
 	shiftOut( flash_sio0 ,  flash_sck , MSBFIRST, 0x66); 
-	digitalWriteFast(flash_cs, 1);
+	CSRELEASESPI();	
 	delayMicroseconds(1);
-	digitalWriteFast(flash_cs, 0);
+	CSASSERT();
 	shiftOut( flash_sio0 ,  flash_sck , MSBFIRST, 0x99);
-	digitalWriteFast(flash_cs, 1);
+	CSRELEASESPI();
 	delayMicroseconds(100);
 
-	//	Read Serial Number. SPI Mode only!
-	digitalWriteFast(flash_cs, 0);
-	shiftOut( flash_sio0 ,  flash_sck , MSBFIRST, 0x4B); 
-	for (int i=0; i<4; i++) {
-		shiftOut( flash_sio0 ,  flash_sck , MSBFIRST, 0); 
-	}
-	for (int i=0; i<8; i++) {
-		serialNumber[i] = shiftIn( flash_sio1 ,  flash_sck , MSBFIRST);
-	}
-	digitalWriteFast(flash_cs, 1);
-		
-	//Write Enable
-	digitalWriteFast(flash_cs, 0);
-	shiftOut( flash_sio0 ,  flash_sck , MSBFIRST, 0x06); //Write Enable
-	digitalWriteFast(flash_cs, 1);
-	delay(16);
-
-#ifdef DEBUG
-	digitalWriteFast(flash_cs, 0);
-	shiftOut( flash_sio0 ,  flash_sck , MSBFIRST, 0x05); //Read Status Register 1
-	uint8_t r = shiftIn( flash_sio1 ,  flash_sck , MSBFIRST);
-	digitalWriteFast(flash_cs, 1);
-	Serial.print("Status Register 1:0x");
-	Serial.println(r, HEX);
-	//delayMicroseconds(1);
-
-	digitalWriteFast(flash_cs, 0);
-	shiftOut( flash_sio0 ,  flash_sck , MSBFIRST, 0x15); //Read Status Register 3
-	r = shiftIn( flash_sio1 ,  flash_sck , MSBFIRST);
-	// Serial.print("Status Register 3:0x");
-	// Serial.println(r, HEX);
-	digitalWriteFast(flash_cs, 1);
-	//delayMicroseconds(1);
-#endif
-/*
-	digitalWriteFast(flash_cs, 0);
-	shiftOut( flash_sio0 ,  flash_sck , MSBFIRST, 0x35); //Read Status Register 2
-	r = shiftIn( flash_sio1 ,  flash_sck , MSBFIRST);
-	// Serial.print("Status Register 2:0x");
-	// Serial.println(r, HEX);
-	digitalWriteFast(flash_cs, 1);
-	//delayMicroseconds(1);
-*/
-	//Enter QPI Mode
-
-	//Serial.println("Enabling QPI in SR2");
-	//Enable QPI in Statusregister 2:
-	digitalWriteFast(flash_cs, 0);
-	shiftOut( flash_sio0 ,  flash_sck , MSBFIRST, 0x31); //Write Status Register 2
-	shiftOut( flash_sio0 ,  flash_sck , MSBFIRST,  2);
-	digitalWriteFast(flash_cs, 1);
-	delay(16);
-#ifdef DEBUG
-	digitalWriteFast(flash_cs, 0);
-	shiftOut( flash_sio0 ,  flash_sck , MSBFIRST, 0x35); //Read Status Register 2
-	r = shiftIn( flash_sio1 ,  flash_sck , MSBFIRST);
-	digitalWriteFast(flash_cs, 1);
-	Serial.print("Status Register 2:0x");
-	Serial.println(r, HEX);
-	delayMicroseconds(1);
-#endif
-
-
-	digitalWriteFast(flash_cs, 0);
-	shiftOut( flash_sio0 ,  flash_sck , MSBFIRST, 0x38); //Enter QPI Mode
-	digitalWriteFast(flash_cs, 1);
-
+	//Configure Pins for fast switching/reading
+	//todo: use somehow masks or pinnumbers here
 	pinConfigD->PCR0 = 0x100;
 	pinConfigD->PCR1 = 0x100;
 	pinConfigD->PCR2 = 0x100;
@@ -507,12 +438,49 @@ bool ParallelFlashChip::begin()
   
 	pinConfigD->PCR5 = 0x100;
 	pinConfigD->PCR7 = 0x100;
+	//Don't use pinMode below this point! It would change the PCR settings
+	
+	CSASSERT();
+	shiftOut( flash_sio0 ,  flash_sck , MSBFIRST, 0x06); //Write Enable
+	CSRELEASESPI();	
 
-	digitalWriteFast(flash_sck, 1);
-	GPIOD_PDDR &= ~0x0f;
-	
-	CSRELEASE(); 
-	
+#ifdef DEBUG
+	CSASSERT();
+	shiftOut( flash_sio0 ,  flash_sck , MSBFIRST, 0x05); //Read Status Register 1
+	uint8_t r = shiftIn( flash_sio1 ,  flash_sck , MSBFIRST);
+	CSRELEASESPI();
+	Serial.print("Status Register 1:0x");
+	Serial.println(r, HEX);
+
+	CSASSERT();
+	shiftOut( flash_sio0 ,  flash_sck , MSBFIRST, 0x15); //Read Status Register 3
+	r = shiftIn( flash_sio1 ,  flash_sck , MSBFIRST);
+	Serial.print("Status Register 3:0x");
+	Serial.println(r, HEX);
+	CSRELEASESPI();
+
+#endif
+	//Enter QPI Mode
+
+	//Serial.println("Enabling QPI in SR2");
+	//Enable QPI in Statusregister 2:
+	//digitalWriteFast(flash_cs, 0);
+	CSASSERT();
+	shiftOut( flash_sio0,  flash_sck , MSBFIRST, 0x31); //Write Status Register 2
+	shiftOut( flash_sio0,  flash_sck , MSBFIRST,  2);
+	CSRELEASESPI();
+	delay(16); //needed here
+#ifdef DEBUG
+	CSASSERT();
+	shiftOut( flash_sio0 ,  flash_sck , MSBFIRST, 0x35); //Read Status Register 2
+	r = shiftIn( flash_sio1 ,  flash_sck , MSBFIRST);
+	CSRELEASESPI();
+	Serial.print("Status Register 2:0x");
+	Serial.println(r, HEX);
+#endif
+
+	enterQPI();
+
 	readID(id);
 	f = 0;
 	size = capacity(id);
@@ -521,15 +489,14 @@ bool ParallelFlashChip::begin()
 		f |= FLAG_32BIT_ADDR;
 
 		// micron & winbond & macronix use command
-		flash_QpiWriteByte(0x06); // write enable		
+		writeByte(0x06); // write enable		
 		CSRELEASE();
 		//delayMicroseconds(1);		
-		flash_QpiWriteByte(0xB7); // enter 4 byte addr mode
+		writeByte(0xB7); // enter 4 byte addr mode
 		CSRELEASE();
 		
 	}
 	flags = f;
-	readID(id);
 	return true;
 }
 
@@ -538,13 +505,13 @@ bool ParallelFlashChip::begin()
 void ParallelFlashChip::sleep()
 {
 	if (busy) wait();
-	flash_QpiWriteByte(0xB9); // Deep power down command
+	writeByte(0xB9); // Deep power down command
 	CSRELEASE();
 }
 
 void ParallelFlashChip::wakeup()
 {
-	flash_QpiWriteByte(0xAB); // Wake up from deep power down command
+	writeByte(0xAB); // Wake up from deep power down command
 	CSRELEASE();
 }
 
@@ -552,32 +519,45 @@ void ParallelFlashChip::readID(uint8_t *buf)
 {
 	if (busy) wait();
 
-	flash_QpiWriteByte(0x9F);
-	flash_QpiReadBytes(buf, 3);  // manufacturer ID, memory type, capacity
+	writeByte(0x9F);
+	readBytes(buf, 3);  // manufacturer ID, memory type, capacity
 	CSRELEASE();
-	//Serial.printf("ID: %02X %02X %02X\n", buf[0], buf[1], buf[2]);
+//	Serial.printf("ID: %02X %02X %02X\n", buf[0], buf[1], buf[2]);
 }
 
 void ParallelFlashChip::readSerialNumber(uint8_t *buf) //needs room for 8 bytes
 {
-	for (int i=0; i<8; i++) {
-		buf[i]=serialNumber[i];
+
+	exitQPI();
+	
+	GPIO_D->PCOR = (1<<5);
+	CSASSERT();
+
+	shiftOut( flash_sio0 ,  flash_sck , MSBFIRST, 0x4B); 
+	for (int i=0; i<4; i++) {
+		shiftIn( flash_sio1 ,  flash_sck , MSBFIRST);
 	}
+	for (int i=0; i<8; i++) {
+		buf[i] = shiftIn( flash_sio1 ,  flash_sck , MSBFIRST);
+	}
+	CSRELEASESPI();
+	
+	enterQPI();
+
+//	uint8_t id[3];
+//	readID(id);
     //Serial.printf("Serial Number: %02X %02X %02X %02X %02X %02X %02X %02X\n", buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7]);	
 }
 
 uint32_t ParallelFlashChip::capacity(const uint8_t *id)
 {
-	uint32_t n = 1048576; // unknown chips, default to 1 MByte
-
 	if (id[2] >= 16 && id[2] <= 31) {
-		n = 1ul << id[2];
+		return 1ul << id[2];
 	} else
 	if (id[2] >= 32 && id[2] <= 37) {
-		n = 1ul << (id[2] - 6);
-	}
-	//Serial.printf("capacity %lu\n", n);
-	return n;
+		return 1ul << (id[2] - 6);
+	} else  
+	return 1048576; // unknown chips, default to 1 MByte
 }
 
 uint32_t ParallelFlashChip::blockSize()
