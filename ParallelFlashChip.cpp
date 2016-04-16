@@ -180,14 +180,17 @@ uint8_t ParallelFlashChip::readByte(void) {
 }
 
 void ParallelFlashChip::readBytes( uint8_t * const buf, int len) {
-  if (len == 0) return;
-  GPIO_D->PDDR &= ~0x0f;    
- 
-  size_t cnt = 0;
+  //if (len == 0) return;
+
   uint32_t val;
+  uint8_t *src = buf;
+  const uint8_t *target = src + len;
+
   
+  GPIO_D->PDDR &= ~0x0f;      
   GPIO_D->PCOR = MASK_CS;
-  do {          
+   
+  while (((uintptr_t) src & 0x03) != 0 && src < target)  {
     GPIO_D->PTOR = MASK_SCK;
 	flash_Wait2;
     GPIO_D->PTOR = MASK_SCK;
@@ -197,9 +200,73 @@ void ParallelFlashChip::readBytes( uint8_t * const buf, int len) {
 	flash_Wait2;
     GPIO_D->PTOR = MASK_SCK;
 	flash_Wait3;
-    buf[cnt] = val | ( GPIO_D->PDIR & 0x0f );
-	cnt++;
-  } while (--len);
+    *src = val | ( GPIO_D->PDIR & 0x0f );
+	src += 1;
+  }
+
+  while (src <= target - 4)  {
+    GPIO_D->PTOR = MASK_SCK;
+	flash_Wait2;
+    GPIO_D->PTOR = MASK_SCK;
+	flash_Wait3;
+    val = (GPIO_D->PDIR & 0x0f) << 4;
+    GPIO_D->PTOR = MASK_SCK;	
+	flash_Wait2;
+    GPIO_D->PTOR = MASK_SCK;
+	flash_Wait3;
+    val |= (GPIO_D->PDIR & 0x0f);
+	
+    GPIO_D->PTOR = MASK_SCK;
+	flash_Wait2;
+    GPIO_D->PTOR = MASK_SCK;
+	flash_Wait3;
+    val |= (GPIO_D->PDIR & 0x0f) << 12;
+    GPIO_D->PTOR = MASK_SCK;	
+	flash_Wait2;
+    GPIO_D->PTOR = MASK_SCK;
+	flash_Wait3;
+    val |= (GPIO_D->PDIR & 0x0f) << 8;
+
+    GPIO_D->PTOR = MASK_SCK;
+	flash_Wait2;
+    GPIO_D->PTOR = MASK_SCK;
+	flash_Wait3;
+    val |= (GPIO_D->PDIR & 0x0f) << 20;
+    GPIO_D->PTOR = MASK_SCK;	
+	flash_Wait2;
+    GPIO_D->PTOR = MASK_SCK;
+	flash_Wait3;
+    val |= (GPIO_D->PDIR & 0x0f) << 16;
+
+    GPIO_D->PTOR = MASK_SCK;
+	flash_Wait2;
+    GPIO_D->PTOR = MASK_SCK;
+	flash_Wait3;
+    val |= (GPIO_D->PDIR & 0x0f) << 28;
+    GPIO_D->PTOR = MASK_SCK;	
+	flash_Wait2;
+    GPIO_D->PTOR = MASK_SCK;
+	flash_Wait3;
+    val |= (GPIO_D->PDIR & 0x0f) << 24;
+	
+	*(uint32_t*) src = val;
+	src += 4;
+  }
+  
+  while (src < target)  {
+    GPIO_D->PTOR = MASK_SCK;
+	flash_Wait2;
+    GPIO_D->PTOR = MASK_SCK;
+	flash_Wait3;
+    val = (GPIO_D->PDIR<< 4) & 0xf0;
+    GPIO_D->PTOR = MASK_SCK;	
+	flash_Wait2;
+    GPIO_D->PTOR = MASK_SCK;
+	flash_Wait3;
+    *src = val | ( GPIO_D->PDIR & 0x0f );
+	src += 1;
+  }
+
 }
 
 void ParallelFlashChip::wait(void)
