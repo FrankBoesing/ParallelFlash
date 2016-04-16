@@ -184,7 +184,7 @@ void ParallelFlashChip::readBytes( uint8_t * const buf, int len) {
   GPIO_D->PDDR &= ~0x0f;    
  
   size_t cnt = 0;
-  volatile uint32_t val;
+  uint32_t val;
   
   GPIO_D->PCOR = MASK_CS;
   do {          
@@ -197,7 +197,8 @@ void ParallelFlashChip::readBytes( uint8_t * const buf, int len) {
 	flash_Wait2;
     GPIO_D->PTOR = MASK_SCK;
 	flash_Wait3;
-    buf[cnt++] = val | ( GPIO_D->PDIR & 0x0f );
+    buf[cnt] = val | ( GPIO_D->PDIR & 0x0f );
+	cnt++;
   } while (--len);
 }
 
@@ -223,7 +224,7 @@ void ParallelFlashChip::read(uint32_t addr, void *buf, uint32_t len)
 	uint8_t *p = (uint8_t *)buf;
 	uint8_t b, f, status;
 
-	memset(p, 0, len);
+	//memset(p, 0, len);
 	f = flags;	
 	b = busy;
 	if (b) {
@@ -238,7 +239,7 @@ void ParallelFlashChip::read(uint32_t addr, void *buf, uint32_t len)
 		} else if (b < 3) {
 			writeByte(0x06); // write enable		
 			CSRELEASE();	
-			//delayMicroseconds(1);			
+		
 			writeByte(0x75);// Suspend command
 			CSRELEASE();
 			
@@ -254,26 +255,22 @@ void ParallelFlashChip::read(uint32_t addr, void *buf, uint32_t len)
 			b = 0;			// the transaction??
 		}
 	}
-	do {
-		uint32_t rdlen = len;
 
-		if (f & FLAG_32BIT_ADDR) {			
-			writeByte(0x0b);
-			write16(addr >> 16);			
-			write16(addr);		
-			readByte();//dummy
-		} else {
-			write16(0x0b00 | ((addr >> 16) & 255));
-			write16(addr);
-			readByte();//dummy
-		}
+
+	if (f & FLAG_32BIT_ADDR) {			
+		writeByte(0x0b);
+		write16(addr >> 16);			
+		write16(addr);		
+		readByte();//dummy
+	} else {
+		write16(0x0b00 | ((addr >> 16) & 255));
+		write16(addr);
+		readByte();//dummy
+	}
 		
-		readBytes(p, rdlen);		
-		CSRELEASE();
-		p += rdlen;
-		addr += rdlen;
-		len -= rdlen;
-	} while (len > 0);
+	readBytes(p, len);		
+	CSRELEASE();
+
 	if (b) {	
 		writeByte(0x06); // write enable		
 		CSRELEASE();
