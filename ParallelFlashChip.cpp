@@ -118,11 +118,10 @@ uint8_t ParallelFlashChip::busy = 0;
 
 	
 void ParallelFlashChip::writeByte(const uint8_t val) {
-  uint32_t clk0, clk1;
-  GPIO_D->PDDR |= 0x0f;
-  clk0 = GPIO_D->PDOR & ~MASK_ALL;  
-  clk1 = clk0 | MASK_SCK; 
-   
+  uint32_t clk0 = GPIO_D->PDOR & ~MASK_ALL;  
+  uint32_t clk1 = clk0 | MASK_SCK; //CS=0; CLK=1
+  
+  GPIO_D->PDDR |= 0x0f;   
   GPIO_D->PDOR = clk0;
   flash_Wait2; 
   GPIO_D->PDOR = clk1  | (val >> 4);  
@@ -133,17 +132,21 @@ void ParallelFlashChip::writeByte(const uint8_t val) {
 }
 
 void ParallelFlashChip::writeBytes(const uint8_t * buf, const int len) {
-  uint32_t clk0, clk1;
+  
+  uint32_t clk0 = GPIO_D->PDOR & ~MASK_ALL;  
+  uint32_t clk1 = clk0 | MASK_SCK; //CS=0; CLK=1
+
+  uint8_t *src = (uint8_t *) buf;
+  uint8_t *target = src + len;
+  
   uint8_t val;
   
   GPIO_D->PDDR |= 0x0f;
-  clk0 = GPIO_D->PDOR & ~MASK_ALL;  
-  clk1 = clk0 | MASK_SCK; //CS=0; CLK=1
-
-  for (int i = 0; i< len; i++) {
+  
+  while (src < target) {
 	GPIO_D->PDOR = clk0;
 	flash_Wait1; 
-	val = buf[i];
+	val = *src++;
 	GPIO_D->PDOR = clk1  | (val >> 4);  
 	flash_Wait2;
 	GPIO_D->PDOR = clk0;
@@ -157,11 +160,15 @@ void ParallelFlashChip::write16(const uint16_t val) {
 	writeBytes((uint8_t*) &buf, 2);
 }
 
+void ParallelFlashChip::write32(const uint32_t val) {
+	uint32_t buf = __REV(val);
+	writeBytes((uint8_t*) &buf, 4);
+}
+
 uint8_t ParallelFlashChip::readByte(void) {
-  GPIO_D->PDDR &= ~0x0f;    
+  uint32_t val;
   
-  volatile uint32_t val;
-  
+  GPIO_D->PDDR &= ~0x0f;      
   GPIO_D->PCOR = MASK_CS;
   
   GPIO_D->PTOR = MASK_SCK;
@@ -179,13 +186,12 @@ uint8_t ParallelFlashChip::readByte(void) {
  
 }
 
-void ParallelFlashChip::readBytes( uint8_t * const buf, int len) {
+void ParallelFlashChip::readBytes( uint8_t * const buf, const int len) {
   //if (len == 0) return;
 
   uint32_t val;
   uint8_t *src = buf;
-  const uint8_t *target = src + len;
-
+  uint8_t *target = src + len;
   
   GPIO_D->PDDR &= ~0x0f;      
   GPIO_D->PCOR = MASK_CS;
@@ -204,7 +210,8 @@ void ParallelFlashChip::readBytes( uint8_t * const buf, int len) {
 	src += 1;
   }
 
-  while (src <= target - 4)  {
+  uint8_t *target4 = (uint8_t*)((uintptr_t)(target) & ~0x03);
+  while (src < target4)  {
     GPIO_D->PTOR = MASK_SCK;
 	flash_Wait2;
     GPIO_D->PTOR = MASK_SCK;
@@ -326,12 +333,10 @@ void ParallelFlashChip::read(uint32_t addr, void *buf, uint32_t len)
 
 	if (f & FLAG_32BIT_ADDR) {			
 		writeByte(0x0b);
-		write16(addr >> 16);			
-		write16(addr);		
+		write32(addr);			
 		readByte();//dummy
 	} else {
-		write16(0x0b00 | ((addr >> 16) & 255));
-		write16(addr);
+		write32((0x0b << 24) | addr);
 		readByte();//dummy
 	}
 		
@@ -341,7 +346,6 @@ void ParallelFlashChip::read(uint32_t addr, void *buf, uint32_t len)
 	if (b) {	
 		writeByte(0x06); // write enable		
 		CSRELEASE();
-		//delayMicroseconds(1);		
 		writeByte(0x7A);// Suspend command
 		CSRELEASE();		
 	}
@@ -361,16 +365,17 @@ void ParallelFlashChip::write(uint32_t addr, const void *buf, uint32_t len)
 		pagelen = (len <= max) ? len : max;		
 		 //Serial.printf("WR: addr %08X, pagelen %d\n", addr, pagelen);
 		if (flags & FLAG_32BIT_ADDR) {
-			writeByte(0x02); // program page command
-			write16(addr >> 16);
-			write16(addr);
+			writeByte(0x02); // program page command			
+			//write16(addr >> 16);
+			//write16(addr);
+			write32(addr);
 		} else {
-			write16(0x0200 | ((addr >> 16) & 255));
-			write16(addr);
+			//write16(0x0200 | ((addr >> 16) & 255));
+			//write16(addr);
+			write32((0x02 << 24) | addr);
 		}
 		addr += pagelen;
 		len -= pagelen;
-		//delayMicroseconds(1);//Is this needed ?
 		do {
 			writeByte(*p++);			
 		} while (--pagelen > 0);
@@ -388,7 +393,6 @@ void ParallelFlashChip::eraseAll()
 	// bulk erase command
 	writeByte(0x06); // write enable		
 	CSRELEASE();
-	//delayMicroseconds(1);
 	writeByte(0xC7);
 	CSRELEASE();
 	busy = 3;
@@ -400,14 +404,15 @@ void ParallelFlashChip::eraseBlock(uint32_t addr)
 	if (busy) wait();
 	writeByte(0x06); // write enable		
 	CSRELEASE();
-	//delayMicroseconds(1);	
 	if (f & FLAG_32BIT_ADDR) {
 		writeByte(0xD8); 		
-		write16(addr >> 16);
-		write16(addr);
+		//write16(addr >> 16);
+		//write16(addr);
+		write32(addr);
 	} else {
-		write16(0xD800 | ((addr >> 16) & 255));
-		write16(addr);
+		//write16(0xD800 | ((addr >> 16) & 255));
+		//write16(addr);
+		write32((0xD8 << 24) | addr);
 	}
 	CSRELEASE();
 	busy = 2;
@@ -494,7 +499,7 @@ bool ParallelFlashChip::begin()
 	delayMicroseconds(100);
 
 	//Configure Pins for fast switching/reading
-	//todo: use somehow masks or pinnumbers here
+	//todo: use masks or pinnumbers here
 	pinConfigD->PCR0 = 0x100;
 	pinConfigD->PCR1 = 0x100;
 	pinConfigD->PCR2 = 0x100;
@@ -555,7 +560,6 @@ bool ParallelFlashChip::begin()
 		// micron & winbond & macronix use command
 		writeByte(0x06); // write enable		
 		CSRELEASE();
-		//delayMicroseconds(1);		
 		writeByte(0xB7); // enter 4 byte addr mode
 		CSRELEASE();
 		
@@ -649,9 +653,9 @@ W25Q128FV	4	32	64
 //			size	sector			busy	pgm/erase	chip
 // Part			Mbyte	kbyte	ID bytes	cmd	suspend		erase
 // ----			----	-----	--------	---	-------		-----
-// Winbond W25Q64CV	8	64	EF 40 17
-// Winbond W25Q128FV	16	64	EF 40 18	05	single		60 & C7
-// Winbond W25Q256FV	32	64	EF 40 19	
+// Winbond W25Q64CV	8	64	EF 60 17
+// Winbond W25Q128FV	16	64	EF 60 18	05	single		60 & C7
+// Winbond W25Q256FV	32	64	EF 60 19	
 
 
 ParallelFlashChip ParallelFlash;
