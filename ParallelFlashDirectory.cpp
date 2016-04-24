@@ -1,6 +1,6 @@
 /* ParallelFlash. Library - for filesystem-like access to SPI Serial Flash memory
  * https://github.com/PaulStoffregen/ParallelFlash.
- * Copyright (C) 2015, Paul Stoffregen, paul@pjrc.com
+ * Copyright (C) 2015,2016, Paul Stoffregen, paul@pjrc.com, F. Boesing
  *
  * Development of this library was funded by PJRC.COM, LLC by sales of Teensy.
  * Please support PJRC's efforts to develop open source software by purchasing

@@ -1,6 +1,6 @@
 /* ParallelFlash. Library - for filesystem-like access to SPI Serial Flash memory
- * https://github.com/PaulStoffregen/ParallelFlash.
- * Copyright (C) 2015, Paul Stoffregen, paul@pjrc.com
+ * https://github.com/FrankBoesing/ParallelFlash
+ * Copyright (C) 2015,2016, Paul Stoffregen, F. Boesing
  *
  * Development of this library was funded by PJRC.COM, LLC by sales of Teensy.
  * Please support PJRC's efforts to develop open source software by purchasing
@@ -70,9 +70,10 @@ private:
 	static void exitQPI();
 	static void writeByte(const uint8_t val);
 	static void writeBytes(const uint8_t * buf, const int len);
-	static void write16(const uint16_t val);
+	inline static void write16(const uint16_t val) __attribute__((always_inline));
+	inline static void write32(const uint32_t val) __attribute__((always_inline));
 	static uint8_t readByte(void);
-	static void readBytes( uint8_t * const buf, int len); 
+	static void readBytes( uint8_t * const buf, const int len);
 };
 
 extern ParallelFlashChip ParallelFlash;
