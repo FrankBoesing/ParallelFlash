@@ -650,7 +650,7 @@ uint32_t ParallelFlashChip::capacity(const uint8_t *id)
 	} else
 	if ((id[0]==0 && id[1]==0 && id[2]==0) || 
 		(id[0]==255 && id[1]==255 && id[2]==255)) {
-		n = 0;
+		return 0;
 	} else	
 	return 1048576; // unknown chips, default to 1 MByte
 }
